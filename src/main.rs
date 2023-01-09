@@ -172,6 +172,9 @@ async fn fetch_game_state(ctx: Context, game_id: &str) -> anyhow::Result<()> {
             .await?;
         ctx.saver.save_fetch(&game_state).await?;
 
+        let sg = serde_json::from_slice::<ScheduledGame>(&game_state.data)?;
+        ctx.saver.save_game(&sg, serde_json::from_slice(&game_state.data)?, game_state.timestamp_after).await?;
+
         let box_score = ctx
             .client
             .fetch(&format!(
