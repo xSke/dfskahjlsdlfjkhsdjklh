@@ -7,7 +7,7 @@ use sqlx::{
     Pool, Sqlite,
 };
 
-use crate::{client::SavedRequest, pusher::PusherMessage, ScheduledGame};
+use crate::{client::SavedRequest, pusher::PusherMessage, ScheduledGame, GameStateUpdate};
 
 #[derive(Clone)]
 pub struct DataSaver {
@@ -62,12 +62,12 @@ impl DataSaver {
         Ok(())
     }
 
-    pub async fn save_pusher(&self, timestamp: Duration, evt: PusherMessage) -> anyhow::Result<()> {
+    pub async fn save_pusher(&self, timestamp: Duration, evt: &PusherMessage) -> anyhow::Result<()> {
         sqlx::query("insert into events (timestamp, channel, event, payload) values (?, ?, ?, ?)")
             .bind(timestamp.as_secs_f64())
-            .bind(evt.channel)
-            .bind(evt.event)
-            .bind(evt.data)
+            .bind(&evt.channel)
+            .bind(&evt.event)
+            .bind(&evt.data)
             .execute(&self.pool)
             .await?;
 
@@ -89,6 +89,30 @@ impl DataSaver {
             .bind(data.to_string())
             .execute(&self.pool)
         .await?;
+
+        Ok(())
+    }
+
+    pub async fn save_game_update(&self, game_id: &str, update: &GameStateUpdate, data: serde_json::Value) -> anyhow::Result<()> {
+        sqlx::query("insert or ignore into game_updates (game_id, display_order, timestamp, data) values (?, ?, ?, ?)")
+            .bind(game_id)
+            .bind(update.display_order)
+            .bind(&update.display_time)
+            .bind(data.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn save_game_update_full(&self, game_id: &str, update: &GameStateUpdate, data: serde_json::Value) -> anyhow::Result<()> {
+        sqlx::query("insert or ignore into game_updates (game_id, display_order, timestamp, data) values (?, ?, ?, ?)")
+            .bind(game_id)
+            .bind(update.display_order)
+            .bind(&update.display_time)
+            .bind(data.to_string())
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

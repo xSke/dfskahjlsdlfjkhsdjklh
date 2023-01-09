@@ -36,3 +36,11 @@ create table if not exists players (
     day int,
     unique (player_id, etag, season, day)
 );
+
+create table if not exists game_updates (
+    game_id text,
+    display_order integer,
+    timestamp text,
+    data text,
+    primary key (game_id, display_order)
+);

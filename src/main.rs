@@ -5,14 +5,16 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use base64::Engine;
 use client::DataClient;
 
+use flate2::bufread::GzDecoder;
 use futures::{stream, Future, Stream, StreamExt, FutureExt};
 
 use pusher::{Pusher, PusherMessage};
 
 use saver::DataSaver;
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
 
 use tokio::{
     sync::RwLock,
@@ -159,16 +161,25 @@ async fn poll_post_feed(ctx: Context) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn fetch_box_score(ctx: Context, game_id: &str) -> anyhow::Result<()> {
+async fn fetch_game_state(ctx: Context, game_id: &str) -> anyhow::Result<()> {
     if let Some((season, _)) = ctx.get_season_day().await {
-        let resp = ctx
+        let game_state = ctx
+            .client
+            .fetch(&format!(
+                "https://api2.blaseball.com/seasons/{}/games/{}",
+                season, game_id
+            ))
+            .await?;
+        ctx.saver.save_fetch(&game_state).await?;
+
+        let box_score = ctx
             .client
             .fetch(&format!(
                 "https://api2.blaseball.com/seasons/{}/games/{}/boxScore",
                 season, game_id
             ))
             .await?;
-        ctx.saver.save_fetch(&resp).await?;
+        ctx.saver.save_fetch(&box_score).await?;
     }
     Ok(())
 }
@@ -308,7 +319,7 @@ async fn poll_games_live(mut ctx: Context) -> anyhow::Result<()> {
             .for_each_concurrent(2, |game_id| {
                 let ctx = ctx.clone();
                 async move {
-                    if let Err(e) = fetch_box_score(ctx, &game_id).await {
+                    if let Err(e) = fetch_game_state(ctx, &game_id).await {
                         dbg!(e);
                     }
                 }
@@ -380,6 +391,47 @@ where
     }
 }
 
+
+#[derive(Deserialize)]
+struct WrappedMessage {
+    message: String
+}
+
+fn parse_pusher<T>(msg: &str) -> anyhow::Result<T> where T: DeserializeOwned {
+    let wrapped = serde_json::from_str::<WrappedMessage>(msg)?;
+    if wrapped.message.starts_with("{") {
+        Ok(serde_json::from_str(&wrapped.message)?)
+    } else {
+        let gzipped = base64::engine::general_purpose::STANDARD.decode(wrapped.message)?;
+        let gzip = GzDecoder::new(&gzipped[..]);
+        Ok(serde_json::from_reader(gzip)?)
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GameStateUpdate {
+    #[serde(rename="displayOrder")]
+    display_order: i32,
+    #[serde(rename="displayTime")]
+    display_time: String,
+}
+
+async fn handle_pusher_event(ctx: Context, evt: PusherMessage) -> anyhow::Result<()> {
+    if let Some(channel) = evt.channel {
+        if channel.starts_with("game-feed-") && evt.event == "game-data" {
+            let game_id = &channel[10..];
+
+            let values = parse_pusher::<Vec<serde_json::Value>>(&evt.data)?;
+            for val in values {
+                let state_update = serde_json::from_value::<GameStateUpdate>(val.clone())?;
+                ctx.saver.save_game_update(game_id, &state_update, val).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn read_pusher(
     ctx: Context,
     events: impl Stream<Item = (Duration, PusherMessage)>,
@@ -394,9 +446,15 @@ async fn read_pusher(
 
             let ctx = ctx.clone();
             async move {
-                if let Err(e) = ctx.saver.save_pusher(timestamp, x).await {
+                if let Err(e) = ctx.saver.save_pusher(timestamp, &x).await {
                     dbg!(e);
                 }
+
+                tokio::spawn(async move {
+                    if let Err(e) = handle_pusher_event(ctx, x).await {
+                        dbg!(e);
+                    }
+                });
             }
         })
         .await;
