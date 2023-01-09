@@ -7,7 +7,7 @@ use std::{
 
 use client::DataClient;
 
-use futures::{stream, Future, Stream, StreamExt};
+use futures::{stream, Future, Stream, StreamExt, FutureExt};
 
 use pusher::{Pusher, PusherMessage};
 
@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use tokio::{
     sync::RwLock,
-    time::{interval, MissedTickBehavior},
+    time::{interval, MissedTickBehavior}, signal,
 };
 
 mod client;
@@ -400,7 +400,15 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(run_timed(ctx.clone(), 60*10, poll_all_players));
 
     // i'm really too tired to figure out how to do retry on this so i'm just gonna make it end if it gets an error
-    read_pusher(ctx.clone(), events).await?;
+    // ;
+
+    futures::select! {
+        a = read_pusher(ctx.clone(), events).fuse() => a,
+        b = signal::ctrl_c().fuse() => b.map_err(|_| anyhow::anyhow!("ctrl-c"))
+    }?;
+
+    println!("shutting down");
+    ctx.saver.shutdown().await;
 
     Ok(())
 }
