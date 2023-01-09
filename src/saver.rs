@@ -17,7 +17,7 @@ pub struct DataSaver {
 
 impl DataSaver {
     pub async fn new() -> anyhow::Result<DataSaver> {
-        let options = SqliteConnectOptions::from_str("sqlite:file.db?mode=rwc")?
+        let options = SqliteConnectOptions::from_str("sqlite:data/file.db?mode=rwc")?
             .journal_mode(SqliteJournalMode::Wal);
 
         let pool = SqlitePoolOptions::new().connect_with(options).await?;
