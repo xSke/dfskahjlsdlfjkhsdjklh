@@ -31,7 +31,7 @@ impl DataClient {
         let mut headers = HeaderMap::new();
 
         // i'm too tired for this
-        headers.insert("Cookie", HeaderValue::from_str(include_str!("cookie.txt"))?);
+        headers.insert("Cookie", HeaderValue::from_str(include_str!("cookie.txt").trim())?);
 
         let client = ClientBuilder::new()
             .user_agent("archiver/0.1 (hello umps this is sibr, please do not ban us)")
