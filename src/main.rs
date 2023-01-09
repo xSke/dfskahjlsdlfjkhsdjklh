@@ -429,6 +429,11 @@ async fn handle_pusher_event(ctx: Context, evt: PusherMessage) -> anyhow::Result
         }
     }
 
+    if evt.event == "sim-data" {
+        let data = parse_pusher::<SimData>(&evt.data)?;
+        ctx.update_state(data.sim_data.current_season_id, data.sim_data.current_day).await;
+    }
+
     Ok(())
 }
 
@@ -490,7 +495,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(run_timed(ctx.clone(), 30, poll_flag));
     tokio::spawn(run_timed(ctx.clone(), 30, poll_ticker));
     tokio::spawn(run_timed(ctx.clone(), 30, poll_elections));
-    tokio::spawn(run_timed(ctx.clone(), 3, poll_games_live));
+    tokio::spawn(run_timed(ctx.clone(), 5, poll_games_live));
     tokio::spawn(run_timed(ctx.clone(), 60, poll_players_teams));
     tokio::spawn(run_timed(ctx.clone(), 60, poll_game_schedule));
     tokio::spawn(run_timed(ctx.clone(), 120, poll_hourlys));
