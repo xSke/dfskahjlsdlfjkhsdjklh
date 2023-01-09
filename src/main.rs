@@ -250,6 +250,44 @@ pub struct ScheduledGame {
     updated: String,
 }
 
+#[derive(Deserialize)]
+pub struct ScheduleEntry {
+    #[serde(rename="localDate")]
+    local_date: String
+}
+
+async fn fetch_hourly(mut ctx: Context, day: String) -> anyhow::Result<()> {
+    if let Some((season, _)) = ctx.get_season_day().await {
+        let resp_a = ctx.client.fetch(&format!("https://api2.blaseball.com/schedule/{}/{}", season, &day)).await?;
+        ctx.saver.save_fetch(&resp_a).await?;
+
+        let resp_b = ctx.client.fetch(&format!("https://api2.blaseball.com/schedule/{}/{}/hourly", season, &day)).await?;
+        ctx.saver.save_fetch(&resp_b).await?;        
+    }
+    Ok(())
+}
+
+async fn poll_hourlys(mut ctx: Context) -> anyhow::Result<()> {
+    if let Some((season, _)) = ctx.get_season_day().await {
+        let resp = ctx.client.fetch(&format!("https://api2.blaseball.com/schedule/{}", season)).await?;
+        ctx.saver.save_fetch(&resp).await?;
+
+        let days = serde_json::from_slice::<Vec<ScheduleEntry>>(&resp.data)?;
+        stream::iter(days.into_iter().map(|x| x.local_date))
+        .for_each_concurrent(1, |day| {
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = fetch_hourly(ctx, day).await {
+                    dbg!(e);
+                }
+            }
+        }).await;
+
+    }
+
+    Ok(())
+}
+
 async fn poll_games_live(mut ctx: Context) -> anyhow::Result<()> {
     if let Some((season, _)) = ctx.get_season_day().await {
         let resp = ctx
@@ -397,6 +435,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(run_timed(ctx.clone(), 3, poll_games_live));
     tokio::spawn(run_timed(ctx.clone(), 60, poll_players_teams));
     tokio::spawn(run_timed(ctx.clone(), 60, poll_game_schedule));
+    tokio::spawn(run_timed(ctx.clone(), 120, poll_hourlys));
     tokio::spawn(run_timed(ctx.clone(), 60*10, poll_all_players));
 
     // i'm really too tired to figure out how to do retry on this so i'm just gonna make it end if it gets an error
